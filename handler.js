@@ -6,25 +6,43 @@ import { unwatchFile, watchFile } from 'fs'
 import chalk from 'chalk'
 import fetch from 'node-fetch'
 
+// Import modular utilities
+import { 
+  initializeUserData, 
+  initializeChatData, 
+  initializeSettingsData,
+  ensureDatabaseStructure 
+} from './lib/database.js'
+import { 
+  normalizeJid, 
+  cleanJid, 
+  isRootOwner, 
+  isOwner as checkIsOwner, 
+  isModerator, 
+  isPremium,
+  getBotJids 
+} from './lib/roles.js'
+import { getAdminStatus } from './lib/admin-utils.js'
+import { handleToxicMessage } from './lib/antitoxic.js'
+import { 
+  isNumber, 
+  delay, 
+  pickRandom, 
+  maskSensitiveData,
+  createLogger 
+} from './lib/utils.js'
+
 const { proto, areJidsSameUser } = (await import('@whiskeysockets/baileys')).default
-const isNumber = x => typeof x === 'number' && !isNaN(x)
-const delay = ms => isNumber(ms) && new Promise(resolve => setTimeout(function () {
-    clearTimeout(this)
-    resolve()
-}, ms))
+const logger = createLogger('HANDLER')
 
-// Normaliza un JID a solo el número base (elimina sufijos de dispositivo y no dígitos)
-const normalizeJid = jid => {
-  if (!jid) return ''
-  // Quitar dominio y quedarnos con la parte antes de '@'
-  let base = jid.split('@')[0]
-  // Quitar sufijo de dispositivo si existe (parte después de ':')
-  base = base.split(':')[0]
-  // Mantener solo dígitos
-  return base.replace(/[^0-9]/g, '')
-}
-const cleanJid = jid => jid?.split(':')[0] || ''
-
+/**
+ * Main message handler for the WhatsApp bot
+ * Processes incoming messages, manages user/chat data, checks permissions,
+ * handles plugins, and executes commands
+ * 
+ * @param {Object} chatUpdate - Chat update object from Baileys
+ * @returns {Promise<void>}
+ */
 export async function handler(chatUpdate) {
 this.msgqueque = this.msgqueque || []
 this.uptime = this.uptime || Date.now()
@@ -48,215 +66,48 @@ if (m.isGroup && global.conns && global.conns.length > 1) {
     if (this.user.jid !== elegido.user.jid) return
 }
 
-if (global.db.data == null)
-await global.loadDatabase()       
-try {
-m = smsg(this, m) || m
-if (!m)
-return
-m.exp = 0
-m.coin = false
-try {
-let user = global.db.data.users[m.sender]
-if (typeof user !== 'object')
+// Ensure database is loaded
+if (global.db.data == null) {
+  await global.loadDatabase()
+}
 
-global.db.data.users[m.sender] = {}
-if (user) {
-if (!isNumber(user.exp))
-user.exp = 0
-if (!isNumber(user.coin))
-user.coin = 10
-if (!isNumber(user.joincount))
-user.joincount = 1
-if (!isNumber(user.diamond))
-user.diamond = 3
-if (!isNumber(user.lastadventure))
-user.lastadventure = 0
-if (!isNumber(user.lastclaim))
-user.lastclaim = 0
-if (!isNumber(user.health))
-user.health = 100
-if (!isNumber(user.crime))
-user.crime = 0
-if (!isNumber(user.lastcofre))
-user.lastcofre = 0
-if (!isNumber(user.lastdiamantes))
-user.lastdiamantes = 0
-if (!isNumber(user.lastpago))
-user.lastpago = 0
-if (!isNumber(user.lastcode))
-user.lastcode = 0
-if (!isNumber(user.lastcodereg))
-user.lastcodereg = 0
-if (!isNumber(user.lastduel))
-user.lastduel = 0
-if (!isNumber(user.lastmining))
-user.lastmining = 0
-if (!('muto' in user))
-user.muto = false
-if (!('premium' in user))
-user.premium = false
-if (!user.premium)
-user.premiumTime = 0
-if (!('registered' in user))
-user.registered = false
-if (!('genre' in user))
-user.genre = ''
-if (!('birth' in user))
-user.birth = ''
-if (!('marry' in user))
-user.marry = ''
-if (!('description' in user))
-user.description = ''
-if (!('packstickers' in user))
-user.packstickers = null
-if (!user.registered) {
-if (!('name' in user))
-user.name = m.name
-if (!isNumber(user.age))
-user.age = -1
-if (!isNumber(user.regTime))
-user.regTime = -1
-}
-if (!isNumber(user.afk))
-user.afk = -1
-if (!('afkReason' in user))
-user.afkReason = ''
-if (!('role' in user))
-user.role = 'Nuv'
-if (!('banned' in user))
-user.banned = false
-if (!('useDocument' in user))
-user.useDocument = false
-if (!isNumber(user.level))
-user.level = 0
-if (!isNumber(user.bank))
-user.bank = 0
-if (!isNumber(user.warn))
-user.warn = 0
-} else
-                global.db.data.users[m.sender] = {
-exp: 0,
-coin: 10,
-joincount: 1,
-diamond: 3,
-lastadventure: 0,
-health: 100,
-lastclaim: 0,
-lastcofre: 0,
-lastdiamantes: 0,
-lastcode: 0,
-lastduel: 0,
-lastpago: 0,
-lastmining: 0,
-lastcodereg: 0,
-muto: false,
-registered: false,
-genre: '',
-birth: '',
-marry: '',
-description: '',
-packstickers: null,
-name: m.name,
-age: -1,
-regTime: -1,
-afk: -1,
-afkReason: '',
-banned: false,
-useDocument: false,
-bank: 0,
-level: 0,
-role: 'Nuv',
-premium: false,
-premiumTime: 0,                 
-}
-let chat = global.db.data.chats[m.chat]
-if (typeof chat !== 'object')
-global.db.data.chats[m.chat] = {}
-if (chat) {
-if (!('isBanned' in chat))
-chat.isBanned = false
-if (!('sAutoresponder' in chat))
-chat.sAutoresponder = ''
-if (!('welcome' in chat))
-chat.welcome = true
-if (!('autolevelup' in chat))
-chat.autolevelup = false
-if (!('autoAceptar' in chat))
-chat.autoAceptar = false
-if (!('autosticker' in chat))
-chat.autosticker = false
-if (!('autoRechazar' in chat))
-chat.autoRechazar = false
-if (!('autoresponder' in chat))
-chat.autoresponder = false    
-if (!('detect' in chat))
-chat.detect = true
-if (!('antiBot' in chat))
-chat.antiBot = false
-if (!('antiBot2' in chat))
-chat.antiBot2 = false
-if (!('modoadmin' in chat))                     
-chat.modoadmin = false   
-if (!('antiLink' in chat))
-chat.antiLink = true
-if (!('antiImg' in chat))
-chat.antiImg = false
-if (!('reaction' in chat))
-chat.reaction = false
-if (!('nsfw' in chat))
-chat.nsfw = false
-if (!('antifake' in chat))
-chat.antifake = false
-if (!('delete' in chat))
-chat.delete = false
-if (!isNumber(chat.expired))
-chat.expired = 0
-if (!('antiLag' in chat))
-chat.antiLag = false
-if (!('per' in chat))
-chat.per = []
-} else
-global.db.data.chats[m.chat] = {
-sAutoresponder: '',
-welcome: true,
-isBanned: false,
-autolevelup: false,
-autoresponder: false,
-delete: false,
-autoAceptar: false,
-autoRechazar: false,
-detect: true,
-antiBot: false,
-antiBot2: false,
-modoadmin: false,
-antiLink: true,
-antifake: false,
-reaction: false,
-nsfw: false,
-expired: 0, 
-antiLag: false,
-per: [],
-}
-var settings = global.db.data.settings[this.user.jid]
-if (typeof settings !== 'object') global.db.data.settings[this.user.jid] = {}
-if (settings) {
-if (!('self' in settings)) settings.self = false
-if (!('restrict' in settings)) settings.restrict = true
-if (!('jadibotmd' in settings)) settings.jadibotmd = true
-if (!('antiPrivate' in settings)) settings.antiPrivate = false
-if (!('autoread' in settings)) settings.autoread = false
-} else global.db.data.settings[this.user.jid] = {
-self: false,
-restrict: true,
-jadibotmd: true,
-antiPrivate: false,
-autoread: false,
-status: 0
-}
-} catch (e) {
-console.error(e)
-}
+// Ensure database structure exists
+ensureDatabaseStructure(global.db)
+
+try {
+  m = smsg(this, m) || m
+  if (!m) return
+  
+  m.exp = 0
+  m.coin = false
+  
+  try {
+    // Initialize user data using modular function
+    let user = global.db.data.users[m.sender]
+    if (typeof user !== 'object') {
+      global.db.data.users[m.sender] = {}
+      user = global.db.data.users[m.sender]
+    }
+    global.db.data.users[m.sender] = initializeUserData(user, m.name)
+    
+    // Initialize chat data using modular function
+    let chat = global.db.data.chats[m.chat]
+    if (typeof chat !== 'object') {
+      global.db.data.chats[m.chat] = {}
+      chat = global.db.data.chats[m.chat]
+    }
+    global.db.data.chats[m.chat] = initializeChatData(chat)
+    
+    // Initialize settings data using modular function
+    var settings = global.db.data.settings[this.user.jid]
+    if (typeof settings !== 'object') {
+      global.db.data.settings[this.user.jid] = {}
+      settings = global.db.data.settings[this.user.jid]
+    }
+    global.db.data.settings[this.user.jid] = initializeSettingsData(settings)
+  } catch (e) {
+    logger.error('Error inicializando datos de usuario/chat:', e)
+  }
 const mainBot = global.conn.user.jid
 const chat = global.db.data.chats[m.chat] || {}
 const isSubbs = chat.antiLag === true
@@ -274,178 +125,37 @@ m.text = ''
 
 let _user = global.db.data && global.db.data.users && global.db.data.users[m.sender]
 
+// Get group metadata and participants
 const groupMetadata = m.isGroup ? await this.groupMetadata(m.chat, { force: true }).catch(_ => null) : {}
 const participants = (m.isGroup ? groupMetadata.participants : []) || []
 
-// Normalización robusta de participantes
-const participantsNormalized = participants.map(participant => {
-  const jidRaw = participant?.id || participant?.jid || ''
-  const fullJid = (this.decodeJid ? this.decodeJid(jidRaw) : jidRaw) || jidRaw
-  const num = normalizeJid(fullJid)
-  const role = participant?.admin || participant?.role || null
-  return {
-    id: jidRaw,
-    full: fullJid,
-    num,
-    admin: role, // 'admin' | 'superadmin' | null
-    isAdmin: !!role
-  }
+// Get admin status using modular function
+const adminStatus = getAdminStatus({
+  m,
+  participants,
+  thisConn: this,
+  globalConn: global.conn,
+  areJidsSameUser
 })
 
-// Preparar lista de JIDs del/los bot(s) actuales
-const botJids = []
-if (this?.user?.jid) botJids.push(this.user.jid)
-if (this?.user?.lid) botJids.push(this.user.lid)
-if (global?.conn?.user?.jid) botJids.push(global.conn.user.jid)
-// normalizar y unique
-const botNums = [...new Set(botJids.filter(Boolean).map(j => normalizeJid(this.decodeJid ? this.decodeJid(j) : j)))]
+const { isAdmin, isBotAdmin, isRAdmin, participantUser, botParticipant } = adminStatus
 
-const senderFull = this.decodeJid ? this.decodeJid(m.sender) : m.sender
-const senderNum = normalizeJid(senderFull || m.sender)
-
-// Helper: buscar participante en el metadata original usando areJidsSameUser
-const findRawParticipant = jidToFind => {
-  if (!m.isGroup || !jidToFind) return null
-  try {
-    const targetFull = this.decodeJid ? this.decodeJid(jidToFind) : jidToFind
-    const targetNum = normalizeJid(targetFull || jidToFind)
-    for (const p of participants) {
-      const pJid = p?.id || p?.jid || ''
-      const pFull = this.decodeJid ? this.decodeJid(pJid) : pJid
-      // 1) Try library comparator with different variants
-      try {
-        if (areJidsSameUser(pJid, jidToFind) || areJidsSameUser(pFull, targetFull) || areJidsSameUser(pJid, targetFull)) return p
-      } catch (e) {
-        // ignore comparator errors and fallthrough to simple checks
-      }
-      // 2) Numeric match fallback
-      try {
-        if (normalizeJid(pFull) && normalizeJid(pFull) === targetNum) return p
-        if (normalizeJid(pJid) && normalizeJid(pJid) === targetNum) return p
-      } catch (e) {}
-      // 3) Clean JID compare (strip device suffix)
-      try {
-        if (cleanJid(pJid) && cleanJid(pJid) === cleanJid(jidToFind)) return p
-        if (cleanJid(pFull) && cleanJid(pFull) === cleanJid(targetFull)) return p
-      } catch (e) {}
-      // 4) Exact string fallback
-      if (pJid === jidToFind || pFull === jidToFind) return p
-    }
-    return null
-  } catch (e) {
-    return null
-  }
-}
-
-// Try to find participant for the sender
-let participantRaw = findRawParticipant(m.sender)
-// If not found, try numeric-only matches against normalized participants
-if (!participantRaw && senderNum) {
-  participantRaw = participants.find(p => normalizeJid(this.decodeJid ? this.decodeJid(p?.id || p?.jid || '') : (p?.id || p?.jid || '')) === senderNum) || null
-}
-
-// Try to find the bot participant by scanning all known bot JIDs and botNums
-let botRaw = null
-for (const b of botJids.filter(Boolean)) {
-  botRaw = findRawParticipant(b)
-  if (botRaw) break
-}
-// If still not found, try against botNums
-if (!botRaw && botNums && botNums.length) {
-  for (const bn of botNums) {
-    botRaw = participants.find(p => {
-      const pj = this.decodeJid ? this.decodeJid(p?.id || p?.jid || '') : (p?.id || p?.jid || '')
-      return normalizeJid(pj) === bn
-    }) || null
-    if (botRaw) break
-  }
-}
-
-// Build normalized participant entries from raw if present
-let participantUser = participantRaw ? {
-  id: participantRaw.id || participantRaw.jid,
-  full: this.decodeJid ? this.decodeJid(participantRaw.id || participantRaw.jid) : (participantRaw.id || participantRaw.jid),
-  num: normalizeJid(participantRaw.id || participantRaw.jid),
-  admin: participantRaw.admin || participantRaw.role || null,
-  isAdmin: !!(participantRaw.admin || participantRaw.isAdmin || participantRaw.role === 'admin')
-} : participantsNormalized.find(p => p.num === senderNum || p.full === senderFull || p.id === m.sender) || null
-
-const botParticipant = botRaw ? {
-  id: botRaw.id || botRaw.jid,
-  full: this.decodeJid ? this.decodeJid(botRaw.id || botRaw.jid) : (botRaw.id || botRaw.jid),
-  num: normalizeJid(botRaw.id || botRaw.jid),
-  admin: botRaw.admin || botRaw.role || null,
-  isAdmin: !!(botRaw.admin || botRaw.isAdmin || botRaw.role === 'admin')
-} : participantsNormalized.find(p => botNums.includes(p.num) || botJids.includes(p.full) || botJids.includes(p.id)) || null
-
-// Fallback: sometimes the sender is one of the bot JIDs (multi-connection). If sender not found
-// as a participant but matches a known bot JID/num, treat the sender as the bot participant so
-// admin flags are set correctly.
-if (!participantUser && botParticipant) {
-  let senderMatchesBot = false
-  try {
-    for (const bj of botJids.filter(Boolean)) {
-      try {
-        if (areJidsSameUser(bj, m.sender) || areJidsSameUser(bj, senderFull)) { senderMatchesBot = true; break }
-      } catch (e) {
-        if (cleanJid(bj) === cleanJid(m.sender) || normalizeJid(bj) === senderNum) { senderMatchesBot = true; break }
-      }
-    }
-  } catch (e) {}
-  if (!senderMatchesBot && botNums.includes(senderNum)) senderMatchesBot = true
-  if (senderMatchesBot) {
-    participantUser = {
-      id: botParticipant.id,
-      full: botParticipant.full,
-      num: botParticipant.num,
-      admin: botParticipant.admin,
-      isAdmin: !!botParticipant.isAdmin
-    }
-    console.log('[ADMIN DEBUG] fallback: sender matched a bot JID -> treating sender as botParticipant')
-  }
-}
-
-// Log simple (puedes quitarlo si ya no lo quieres)
-if (m.isGroup) {
-  console.log(`[ADMIN DEBUG] sender:${senderFull} norm:${senderNum} match:${!!participantUser} admin:${participantUser?.admin}`)
-  if (!participantUser) {
-    try {
-      console.log('[ADMIN DEBUG] participantes normalizados (muestra 10):', participantsNormalized.slice(0, 10))
-      console.log('[ADMIN DEBUG] botJids:', botJids, 'botNums:', botNums)
-      try {
-        console.log('[ADMIN DEBUG] participantes raw (muestra 10):', participants.slice(0, 10))
-        console.log('[ADMIN DEBUG] participantRaw:', participantRaw)
-        console.log('[ADMIN DEBUG] botRaw:', botRaw)
-      } catch (e) {
-        console.log('[ADMIN DEBUG] error al imprimir raw participants:', e)
-      }
-    } catch (e) {
-      console.log('[ADMIN DEBUG] error al imprimir participantes:', e)
-    }
-  }
-}
-
-// Cálculo directo de admin
-const isAdmin = !!participantUser?.isAdmin
-const isBotAdmin = !!botParticipant?.isAdmin
-const isRAdmin = participantUser?.admin === 'superadmin' || false
-
-// Flags directos
+// Set admin flags on message object
 m.isAdmin = isAdmin
 m.isSuperAdmin = isRAdmin
 m.isBotAdmin = isBotAdmin
 m.adminRole = isRAdmin ? 'superadmin' : (isAdmin ? 'admin' : null)
 
-// Variable 'user' (participante) para plugins (compatibilidad)
+// Variables for compatibility with plugins
 let user = participantUser || {}
 let bot = botParticipant || {}
 
-const isROwner = [conn.decodeJid(global.conn.user.id), ...global.owner.map(([number]) => number)]
-  .map(v => v.replace(/[^0-9]/g, ''))
-  .includes(senderNum)
-const isOwner = isROwner || m.fromMe
-const isMods = isOwner || global.mods.map(v => v.replace(/[^0-9]/g, '')).includes(senderNum)
-const isPrems = isROwner || global.prems.map(v => v.replace(/[^0-9]/g, '')).includes(senderNum) || _user.premium == true
+// Get role-based permissions
+const senderNum = normalizeJid(this.decodeJid ? this.decodeJid(m.sender) : m.sender)
+const isROwner = isRootOwner(m.sender, conn, global)
+const isOwner = checkIsOwner(isROwner, m.fromMe)
+const isMods = isModerator(m.sender, isOwner, global)
+const isPrems = isPremium(m.sender, isROwner, _user, global)
 
 if (opts['queque'] && m.text && !(isMods || isPrems)) {
 let queque = this.msgqueque, time = 1000 * 5
@@ -464,48 +174,15 @@ m.exp += Math.ceil(Math.random() * 10)
 
 let usedPrefix
 
-    if (m.isGroup && global.db.data.chats[m.chat]?.antitoxic) {
-      const toxicWords = ['g0re', 'gore', 'g0r3', 'g.o.r.e', 'sap0', 'sap4', 'malparido', 'malparida', 'malparidos', 'malparidas', 
-    'm4lp4rid0', 'm4lp4rido', 'm4lparido', 'malp4rido', 'm4lparid0', 'malp4rid0', 'chocha', 'chup4la', 
-    'chup4l4', 'chupalo', 'chup4lo', 'chup4l0', 'chupal0', 'chupon', 'chupameesta', 'sabandija', 
-    'hijodelagranputa', 'hijodeputa', 'hijadeputa', 'hijadelagranputa', 'kbron', 'kbrona', 'cajetuda', 
-    'laconchadedios', 'putita', 'putito', 'put1t4', 'putit4', 'putit0', 'put1to', 'put1ta', 'pr0stitut4s', 
-    'pr0stitutas', 'pr05titutas', 'pr0stitut45', 'prostitut45', 'prostituta5', 'pr0stitut45', 'fanax', 
-    'f4nax', 'drogas', 'droga', 'dr0g4', 'nepe', 'p3ne', 'p3n3', 'pen3', 'p.e.n.e', 'pvt0', 'pvto', 
-    'put0', 'hijodelagransetentamilparesdeputa', 'Chingadamadre', 'coño', 'c0ño', 'coñ0', 'c0ñ0', 
-    'afeminado', 'drog4', 'cocaína', 'marihuana', 'chocho', 'chocha', 'cagon', 'pedorro', 'agrandado', 
-    'agrandada', 'pedorra', 'cagona', 'pinga', 'joto', 'sape', 'mamar', 'chigadamadre', 'hijueputa', 
-    'chupa', 'caca', 'bobo', 'boba', 'loco', 'loca', 'chupapolla', 'estupido', 'estupida', 'estupidos', 
-    'polla', 'pollas', 'idiota', 'maricon', 'chucha', 'verga', 'vrga', 'naco', 'zorra', 'zorro', 
-    'zorras', 'zorros', 'pito', 'huevon', 'huevona', 'huevones', 'rctmre', 'mrd', 'ctm', 'csm', 'cepe', 
-    'sepe', 'sepesito', 'cepecito', 'cepesito', 'hldv', 'ptm', 'baboso', 'babosa', 'babosos', 'babosas', 
-    'feo', 'fea', 'feos', 'feas', 'mamawebos', 'chupame', 'bolas', 'qliao', 'imbecil', 'embeciles', 
-    'kbrones', 'cabron', 'capullo', 'carajo', 'gore', 'gorre', 'gorreo', 'gordo', 'gorda', 'gordos', 
-    'gordas', 'sapo', 'sapa', 'mierda', 'cerdo', 'cerda', 'puerco', 'puerca', 'perra', 'perro', 'dumb', 
-    'fuck', 'shit', 'bullshit', 'cunt', 'semen', 'bitch', 'motherfucker', 'foker', 'fucking', 'puta', 
-    'puto', 'mierda', 'malparido', 'pendejo', 'culiao', 'imbécil', 'estúpido', 'marica', 'perra'] 
-      
-      
-      let regex = new RegExp(`\\b(${toxicWords.join('|')})\\b`, 'i')
-      const isToxic = regex.test(m.text)
-      if (isToxic) {
-        console.log('[!] Detectado lenguaje tóxico:', m.text)
-        let userWarns = global.db.data.users[m.sender].warns || 0
-        userWarns++
-        global.db.data.users[m.sender].warns = userWarns
-        await this.reply(m.chat, `🍭 *Advertencia por toxico ${userWarns}/4*\nEvita usar lenguaje ofensivo.`, m, rcanal)
-    
-        if (userWarns >= 4) {
-          global.db.data.users[m.sender].warns = 0
-          try {
-            await this.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
-            await this.reply(m.chat, `❌ Usuario expulsado por comportamiento tóxico reiterado.`, m, rcanal)
-          } catch (e) {
-            await this.reply(m.chat, `⚠️ No se pudo expulsar al usuario. Verifica si el bot es admin.`, m, rcanal)
-          }
-        }
-      }
-    }
+// Handle anti-toxic messages if enabled
+if (m.isGroup && global.db.data.chats[m.chat]?.antitoxic) {
+  await handleToxicMessage({
+    m,
+    conn: this,
+    db: global.db,
+    rcanal: typeof rcanal !== 'undefined' ? rcanal : null
+  })
+}
 
 const ___dirname = path.join(path.dirname(fileURLToPath(import.meta.url)), './plugins')
 for (let name in global.plugins) {
@@ -720,11 +397,11 @@ if (!isPrems)
 m.coin = m.coin || plugin.coin || false
 } catch (e) {
 m.error = e
-console.error(e)
+logger.error('Error ejecutando plugin:', e)
 if (e) {
 let text = format(e)
-for (let key of Object.values(global.APIKeys))
-text = text.replace(new RegExp(key, 'g'), 'Administrador')
+// Mask sensitive data in error messages
+text = maskSensitiveData(text, global.APIKeys || {})
 m.reply(text)
 }
 } finally {
@@ -797,22 +474,30 @@ if (db.data.chats[m.chat].reaction && m.text.match(/(ción|dad|aje|oso|izar|ment
 let emot = pickRandom(["🍟", "😃", "😄", "😁", "😆", "🍓", "😅", "😂", "🤣", "🥲", "☺️", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "🌺", "🌸", "😚", "😋", "😛", "😝", "😜", "🤪", "🤨", "🌟", "🤓", "😎", "🥸", "🤩", "🥳", "😏", "💫", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😶‍🌫️", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🫣", "🤭", "🤖", "🍭", "🤫", "🫠", "🤥", "😶", "📇", "😐", "💧", "😑", "🫨", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😮‍💨", "😵", "😵‍💫", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👺", "🧿", "🌩", "👻", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "🫶", "👍", "✌️", "🙏", "🫵", "🤏", "🤌", "☝️", "🖕", "🙏", "🫵", "🫂", "🐱", "🤹‍♀️", "🤹‍♂️", "🗿", "✨", "⚡", "🔥", "🌈", "🩷", "❤️", "🧡", "💛", "💚", "🩵", "💙", "💜", "🖤", "🩶", "🤍", "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "🚩", "👊", "⚡️", "💋", "🫰", "💅", "👑", "🐣", "🐤", "🐈"])
 if (!m.fromMe) return this.sendMessage(m.chat, { react: { text: emot, key: m.key }})
 }
-function pickRandom(list) { return list[Math.floor(Math.random() * list.length)]}
 }}
 
+/**
+ * Handle delete message events (anti-delete feature)
+ * @param {Object} message - Delete message event
+ */
 export async function deleteUpdate(message) {
   try {
     const { fromMe, id, participant, remoteJid: chat } = message
 
+    // Ignore messages from bot itself
     if (fromMe) return
 
     let chatData = global.db.data.chats[chat] || {}
+    
+    // Check if anti-delete is enabled for this chat
     if (!chatData.delete) return
 
     let msg = this.messages?.get(chat)?.get(id)
 
     if (!msg) return
     if (!msg?.message) return
+    
+    // Only work in groups
     if (!msg.key?.remoteJid.endsWith('@g.us')) return
 
     const antideleteMessage = `╭•┈•〘✘ 𝗔𝗡𝗧𝗜 𝗗𝗘𝗟𝗘𝗧𝗘 ✘〙•┈• ◊
@@ -831,10 +516,18 @@ export async function deleteUpdate(message) {
     await this.copyNForward(chat, msg)
 
   } catch (e) {
-    console.error('❌ Error en antidelete:', e)
+    logger.error('Error en antidelete:', e)
   }
 }
 
+/**
+ * Default fail handler for permission checks
+ * Sends appropriate error message based on fail type
+ * 
+ * @param {string} type - Type of permission failure
+ * @param {Object} m - Message object
+ * @param {Object} conn - Connection object
+ */
 global.dfail = (type, m, conn) => {
   const msg = {
     rowner: '*`🍉 sᴏʟᴏ ᴅᴇsᴀʀʀᴏʟʟᴀᴅᴏʀ • ᴇsᴛᴇ ᴄᴏᴍᴀɴᴅᴏ sᴏʟᴏ ᴘᴜᴇᴅᴇ sᴇʀ ᴜsᴀᴅᴏ ᴘᴏʀ ᴇʟ ᴅᴇsᴀʀʀᴏʟʟᴀᴅᴏʀ ᴅᴇʟ ʙᴏᴛ`*',
@@ -847,8 +540,14 @@ global.dfail = (type, m, conn) => {
     botAdmin: '*`🍉 sᴏʟᴏ ᴄᴜᴀɴᴅᴏ ᴇʟ ʙᴏᴛ ᴇs ᴀᴅᴍɪɴ • ᴇsᴛᴇ ᴄᴏᴍᴀɴᴅᴏ sᴏʟᴏ ᴘᴜᴇᴅᴇ sᴇʀ ᴜsᴀᴅᴏ ᴄᴜᴀɴᴅᴏ ᴇʟ ʙᴏᴛ ᴇs ᴀᴅᴍɪɴ`*',
     unreg: '*`🍉 ɴᴏ ᴇsᴛᴀ́s ʀᴇɢɪsᴛʀᴀᴅᴏ/ᴀ • ᴇsᴄʀɪʙᴇ .ʀᴇɢ ᴘᴀʀᴀ ᴘᴏᴅᴇʀ ᴜsᴀʀ ᴇsᴛᴀ ғᴜɴᴄɪᴏ́ɴ`*', 
     restrict: '*`🍉 ʀᴇsᴛʀɪɴɢɪᴅᴏ • ʟᴀs ʀᴇsᴛʀɪᴄᴄɪᴏɴᴇs ɴᴏ ᴇsᴛᴀ́ɴ ᴀᴄᴛɪᴠᴀᴅᴀs ᴇɴ ᴇsᴛᴇ ᴄʜᴀᴛ`*'
-}[type];
-if (msg) return conn.reply(m.chat, msg, m, rcanal).then(_ => m.react('✖️'))}
+  }[type]
+  
+  if (msg) {
+    return conn.reply(m.chat, msg, m, typeof rcanal !== 'undefined' ? rcanal : undefined)
+      .then(_ => m.react('✖️'))
+      .catch(e => logger.error('Error enviando mensaje de fallo:', e))
+  }
+}
 let file = global.__filename(import.meta.url, true)
 
 // NO TOCAR
