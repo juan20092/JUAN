@@ -31,6 +31,11 @@ import {
   maskSensitiveData,
   createLogger 
 } from './lib/utils.js'
+import {
+  isCommandMatch,
+  validatePluginPermissions,
+  buildPluginExtra
+} from './lib/plugin-utils.js'
 
 const { proto, areJidsSameUser } = (await import('@whiskeysockets/baileys')).default
 const logger = createLogger('HANDLER')
@@ -157,6 +162,8 @@ const isOwner = checkIsOwner(isROwner, m.fromMe)
 const isMods = isModerator(m.sender, isOwner, global)
 const isPrems = isPremium(m.sender, isROwner, _user, global)
 
+// Message queue management for non-premium/mod users
+// Prevents spam by enforcing a queue delay between messages
 if (opts['queque'] && m.text && !(isMods || isPrems)) {
 let queque = this.msgqueque, time = 1000 * 5
 const previousID = queque[queque.length - 1]
@@ -167,14 +174,17 @@ await delay(time)
 }, time)
 }
 
+// Ignore Baileys internal messages
 if (m.isBaileys) {
 return
 }
+
+// Add random experience points to user
 m.exp += Math.ceil(Math.random() * 10)
 
 let usedPrefix
 
-// Handle anti-toxic messages if enabled
+// Handle anti-toxic messages if enabled for this group
 if (m.isGroup && global.db.data.chats[m.chat]?.antitoxic) {
   await handleToxicMessage({
     m,
@@ -184,14 +194,20 @@ if (m.isGroup && global.db.data.chats[m.chat]?.antitoxic) {
   })
 }
 
+// Plugin directory path
 const ___dirname = path.join(path.dirname(fileURLToPath(import.meta.url)), './plugins')
+
+// Main plugin loop - iterate through all loaded plugins
 for (let name in global.plugins) {
 let plugin = global.plugins[name]
-if (!plugin)
-continue
-if (plugin.disabled)
-continue
+
+// Skip if plugin doesn't exist or is disabled
+if (!plugin) continue
+if (plugin.disabled) continue
+
 const __filename = join(___dirname, name)
+
+// Execute plugin.all function if exists (runs for all messages)
 if (typeof plugin.all === 'function') {
 try {
 await plugin.all.call(this, m, {
@@ -200,14 +216,23 @@ __dirname: ___dirname,
 __filename
 })
 } catch (e) {
-console.error(e)
+logger.error(`Error en plugin.all (${name}):`, e)
 }}
-if (!opts['restrict'])
+
+// Skip admin plugins if restrictions are disabled
+if (!opts['restrict']) {
 if (plugin.tags && plugin.tags.includes('admin')) {
 continue
 }
+}
+
+// Helper function to escape regex special characters
 const str2Regex = str => str.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&')
+
+// Determine the prefix to use for this plugin
 let _prefix = plugin.customPrefix ? plugin.customPrefix : conn.prefix ? conn.prefix : global.prefix
+
+// Match command prefix against message text
 let match = (_prefix instanceof RegExp ? 
 [[_prefix.exec(m.text), _prefix]] :
 Array.isArray(_prefix) ?
@@ -251,18 +276,11 @@ let _args = noPrefix.trim().split` `.slice(1)
 let text = _args.join` `
 command = (command || '').toLowerCase()
 let fail = plugin.fail || global.dfail
-let isAccept = plugin.command instanceof RegExp ? 
-                    plugin.command.test(command) :
-                    Array.isArray(plugin.command) ?
-                        plugin.command.some(cmd => cmd instanceof RegExp ? 
-                            cmd.test(command) :
-cmd === command) :
-typeof plugin.command === 'string' ? 
-plugin.command === command :
-false
 
+// Use optimized command matching
+let isAccept = isCommandMatch(command, plugin.command)
 
-
+// Ignore Baileys internal messages
 if ((m.id.startsWith('NJX-') || (m.id.startsWith('BAE5') && m.id.length === 16) || (m.id.startsWith('B24E') && m.id.length === 20))) return
 
 if (!isAccept) {
@@ -296,64 +314,47 @@ if (name != 'owner-unbanuser.js' && user?.banned)
 return
 }}
 
+// Handle plugin warnings
 if (plugin?.warn && !isOwner && !isROwner) {
-          let warns = global.db.data.users[m.sender].warns || 0
-          warns++
-          global.db.data.users[m.sender].warns = warns
-          await this.reply(m.chat, `⚠️ Advertencia ${warns}/3.`, m, rcanal)
-  
-          if (warns >= 3) {
-            global.db.data.users[m.sender].warns = 0
-            try {
-              await this.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
-              await this.reply(m.chat, `🪴 Has sido expulsado por acumulación de advertencias.`, m, rcanal)
-            } catch (err) {
-              await this.reply(m.chat, `⚠️ No se pudo expulsar al usuario. Revisa permisos del bot.`, m, rcanal)
-            }
-            return
-          }
-        }
+  let warns = global.db.data.users[m.sender].warns || 0
+  warns++
+  global.db.data.users[m.sender].warns = warns
+  await this.reply(m.chat, `⚠️ Advertencia ${warns}/3.`, m, typeof rcanal !== 'undefined' ? rcanal : undefined)
 
-let hl = _prefix 
+  if (warns >= 3) {
+    global.db.data.users[m.sender].warns = 0
+    try {
+      await this.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
+      await this.reply(m.chat, `🪴 Has sido expulsado por acumulación de advertencias.`, m, typeof rcanal !== 'undefined' ? rcanal : undefined)
+    } catch (err) {
+      await this.reply(m.chat, `⚠️ No se pudo expulsar al usuario. Revisa permisos del bot.`, m, typeof rcanal !== 'undefined' ? rcanal : undefined)
+    }
+    return
+  }
+}
+
+// Check admin mode
 let adminMode = global.db.data.chats[m.chat].modoadmin
-let mini = `${plugins.botAdmin || plugins.admin || plugins.group || plugins || noPrefix || hl ||  m.text.slice(0, 1) == hl || plugins.command}`
+let mini = `${plugin.botAdmin || plugin.admin || plugin.group || plugin || noPrefix || _prefix ||  m.text.slice(0, 1) == _prefix || plugin.command}`
 if (adminMode && !isOwner && !isROwner && m.isGroup && !isAdmin && mini) return   
-if (plugin.rowner && plugin.owner && !(isROwner || isOwner)) { 
-fail('owner', m, this)
-continue
+
+// Validate plugin permissions using optimized function
+const permissionCheck = validatePluginPermissions(plugin, {
+  isROwner,
+  isOwner,
+  isMods,
+  isPrems,
+  isAdmin,
+  m,
+  _user,
+  isGroup: m.isGroup
+})
+
+if (!permissionCheck.valid) {
+  fail(permissionCheck.failType, m, this)
+  continue
 }
-if (plugin.rowner && !isROwner) { 
-fail('rowner', m, this)
-continue
-}
-if (plugin.owner && !isOwner) { 
-fail('owner', m, this)
-continue
-}
-if (plugin.mods && !isMods) { 
-fail('mods', m, this)
-continue
-}
-if (plugin.premium && !isPrems) { 
-fail('premium', m, this)
-continue
-}
- if (plugin.admin && !isAdmin) { 
-fail('admin', m, this)
-continue
-}
-if (plugin.private && m.isGroup) {
-fail('private', m, this)
-continue
-}
-if (plugin.group && !m.isGroup) { 
-fail('group', m, this)
-continue
-}
-if (plugin.register == true && _user.registered == false) { 
-fail('unreg', m, this)
-continue
-}
+
 m.isCommand = true
 let xp = 'exp' in plugin ? parseInt(plugin.exp) : 17 
 if (xp > 200)
@@ -368,7 +369,8 @@ if (plugin.level > _user.level) {
 conn.reply(m.chat, `❮✦❯ Se requiere el nivel: *${plugin.level}*\n\n• Tu nivel actual es: *${_user.level}*\n\n• Usa este comando para subir de nivel:\n*${usedPrefix}levelup*`, m)       
 continue
 }
-let extra = {
+// Build extra object for plugin using optimized function
+let extra = buildPluginExtra({
 match,
 usedPrefix,
 noPrefix,
@@ -390,7 +392,8 @@ isPrems,
 chatUpdate,
 __dirname: ___dirname,
 __filename
-}
+})
+
 try {
 await plugin.call(this, m, extra)
 if (!isPrems)
@@ -409,7 +412,7 @@ if (typeof plugin.after === 'function') {
 try {
 await plugin.after.call(this, m, extra)
 } catch (e) {
-console.error(e)
+logger.error('Error ejecutando plugin.after:', e)
 }}
 if (m.coin)
 conn.reply(m.chat, `❮✦❯ Utilizaste ${+m.coin} ${moneda}`, m)
