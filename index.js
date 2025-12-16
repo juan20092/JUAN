@@ -7,7 +7,6 @@ import cfonts from 'cfonts'
 import { createInterface } from 'readline'
 import yargs from 'yargs'
 import chalk from 'chalk'
-import path from 'path'
 import os from 'os'
 import { promises as fsPromises } from 'fs'
 
@@ -28,8 +27,11 @@ say(`Desarrolado por xrljose`, {
   colors: ['cyan', 'magenta', 'yellow']
 })
 
-var isRunning = false
+let isRunning = false
 
+/**
+ * Handle uncaught exceptions to prevent silent failures
+ */
 process.on('uncaughtException', (err) => {
   if (err.code === 'ENOSPC') {
     console.error('Se ha detectado ENOSPC (sin espacio o límite de watchers alcanzado), reiniciando....')
@@ -39,64 +41,21 @@ process.on('uncaughtException', (err) => {
   process.exit(1)
 })
 
-async function start(file) {
-  if (isRunning) return
-  isRunning = true
-  const currentFilePath = new URL(import.meta.url).pathname
-  let args = [join(__dirname, file), ...process.argv.slice(2)]
-  say([process.argv[0], ...args].join(' '), {
-    font: 'console',
-    align: 'center',
-    gradient: ['red', 'magenta']
-  })
-  // Ensure workers get --expose-gc without confusing non-node launchers (e.g., ts-node)
-  const wantFlag = '--expose-gc'
-  // Avoid passing --expose-gc via execArgv to prevent non-node launchers (e.g., ts-node) from treating it as a module
-  const workerExecArgv = process.execArgv.filter(arg => arg !== wantFlag)
-  const envNodeOpts = process.env.NODE_OPTIONS || ''
-  const hasFlagInEnv = envNodeOpts.split(/\s+/).includes(wantFlag)
-  const workerEnv = { ...process.env, NODE_OPTIONS: hasFlagInEnv ? envNodeOpts : `${envNodeOpts} ${wantFlag}`.trim() }
-
-  const setup = typeof cluster.setupPrimary === 'function' ? cluster.setupPrimary : cluster.setupMaster
-  setup({
-    exec: args[0],
-    args: args.slice(1),
-    execArgv: workerExecArgv,
-  })
-  let p = cluster.fork(workerEnv)
-  p.on('message', data => {
-    switch (data) {
-      case 'reset':
-        p.process.kill()
-        isRunning = false
-        start.apply(this, arguments)
-        break
-      case 'uptime':
-        p.send(process.uptime())
-        break
-    }
-  })
-
-  p.on('exit', (_, code) => {
-    isRunning = false
-    console.error('⚠️ ERROR ⚠️ >> ', code)
-    start('main.js')
-
-    if (code === 0) return
-    watchFile(args[0], () => {
-      unwatchFile(args[0])
-      start(file)
-    })
-  })
-
+/**
+ * Display system information and package details
+ * @param {string} currentFilePath - Path to the current file
+ */
+async function displaySystemInfo(currentFilePath) {
   const ramInGB = os.totalmem() / (1024 * 1024 * 1024)
   const freeRamInGB = os.freemem() / (1024 * 1024 * 1024)
-  const packageJsonPath = path.join(path.dirname(currentFilePath), './package.json')
+  const packageJsonPath = join(dirname(currentFilePath), './package.json')
+  
   try {
     const packageJsonData = await fsPromises.readFile(packageJsonPath, 'utf-8')
     const packageJsonObj = JSON.parse(packageJsonData)
     const currentTime = new Date().toLocaleString()
-    let lineM = '⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ 》'
+    const lineM = '⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ 》'
+    
     console.log(chalk.yellow(`╭${lineM}
 ┊${chalk.blueBright('╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅')}
 ┊${chalk.blueBright('┊')}${chalk.yellow(`🖥️ ${os.type()}, ${os.release()} - ${os.arch()}`)}
@@ -119,16 +78,128 @@ async function start(file) {
 ┊${chalk.blueBright('┊')}${chalk.cyan(`${currentTime}`)}
 ┊${chalk.blueBright('╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅')} 
 ╰${lineM}`))
-    setInterval(() => {}, 1000)
   } catch (err) {
-    console.error(chalk.red(`❌ No se pudo leer el archivo package.json: ${err}`))
+    console.error(chalk.red(`❌ No se pudo leer el archivo package.json: ${err.message}`))
+  }
+}
+
+/**
+ * Setup cluster worker with proper configuration
+ * @param {string[]} args - Command line arguments
+ * @returns {object} Forked worker process
+ */
+function setupClusterWorker(args) {
+  // Ensure workers get --expose-gc for better memory management
+  const wantFlag = '--expose-gc'
+  const workerExecArgv = process.execArgv.filter(arg => arg !== wantFlag)
+  const envNodeOpts = process.env.NODE_OPTIONS || ''
+  const hasFlagInEnv = envNodeOpts.split(/\s+/).includes(wantFlag)
+  const workerEnv = { 
+    ...process.env, 
+    NODE_OPTIONS: hasFlagInEnv ? envNodeOpts : `${envNodeOpts} ${wantFlag}`.trim() 
   }
 
-  let opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse())
-  if (!opts['test'])
-    if (!rl.listenerCount()) rl.on('line', line => {
-      p.emit('message', line.trim())
-    })
+  // Use modern API if available, fallback to legacy
+  const setup = typeof cluster.setupPrimary === 'function' ? cluster.setupPrimary : cluster.setupMaster
+  setup({
+    exec: args[0],
+    args: args.slice(1),
+    execArgv: workerExecArgv,
+  })
+  
+  return cluster.fork(workerEnv)
+}
+
+/**
+ * Setup worker message handlers
+ * @param {object} worker - Cluster worker process
+ * @param {Array} startArgs - Arguments for restart
+ */
+function setupWorkerMessageHandlers(worker, startArgs) {
+  worker.on('message', data => {
+    switch (data) {
+      case 'reset':
+        worker.process.kill()
+        isRunning = false
+        start.apply(null, startArgs)
+        break
+      case 'uptime':
+        worker.send(process.uptime())
+        break
+    }
+  })
+}
+
+/**
+ * Setup worker exit handlers
+ * @param {object} worker - Cluster worker process
+ * @param {string[]} args - Command line arguments
+ * @param {string} file - File to restart
+ */
+function setupWorkerExitHandlers(worker, args, file) {
+  worker.on('exit', (_, code) => {
+    isRunning = false
+    console.error('⚠️ ERROR ⚠️ >> ', code)
+    
+    // Restart the main file
+    start('main.js')
+
+    // Watch for changes if exit code is non-zero
+    if (code !== 0) {
+      watchFile(args[0], () => {
+        unwatchFile(args[0])
+        start(file)
+      })
+    }
+  })
+}
+
+/**
+ * Setup readline interface for user input
+ * @param {object} worker - Cluster worker process
+ * @param {object} opts - Command line options
+ */
+function setupReadlineInterface(worker, opts) {
+  if (!opts['test']) {
+    if (!rl.listenerCount()) {
+      rl.on('line', line => {
+        worker.emit('message', line.trim())
+      })
+    }
+  }
+}
+
+/**
+ * Start the application with cluster management
+ * @param {string} file - Main file to execute
+ */
+async function start(file) {
+  if (isRunning) return
+  isRunning = true
+  
+  const currentFilePath = new URL(import.meta.url).pathname
+  const args = [join(__dirname, file), ...process.argv.slice(2)]
+  
+  // Display startup command
+  say([process.argv[0], ...args].join(' '), {
+    font: 'console',
+    align: 'center',
+    gradient: ['red', 'magenta']
+  })
+  
+  // Setup and fork cluster worker
+  const worker = setupClusterWorker(args)
+  
+  // Setup worker event handlers
+  setupWorkerMessageHandlers(worker, arguments)
+  setupWorkerExitHandlers(worker, args, file)
+  
+  // Display system information
+  await displaySystemInfo(currentFilePath)
+  
+  // Setup readline interface
+  const opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse())
+  setupReadlineInterface(worker, opts)
 }
 
 start('main.js')
