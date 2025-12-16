@@ -1,14 +1,14 @@
-/*♡❀˖⁺. ༶🐻✨Este bot es oficialmente  de Juan Xrl🌻♡⛓ ⋆˙⊹❀♡
+/*♡❀˖⁺. ༶🐻✨Este bot es oficialmente  de Juan MD🔪♡⛓ ⋆˙⊹❀♡
 *.°•*.♡ ️ッ Prohibido  editar los creditos ☁✧•. • °
-☆ Creador @xrljuan
+☆ Creador @Mdjuan
 ˚ ༘♡ ·˚꒰Gracias por usar nuestra bot꒱ ₊˚ˑ༄
 
-╭─╮─╭╮─────────────╭─╮─╭╮────╭╮───────────────── 
-││╰╮││─────────────││╰╮││────││───────────────── 
-│╭╮╰╯│╭╮╭─╮─╭──╮───│╭╮╰╯│╭──╮││╭╮╭──╮╭─╮─╭──╮─── 
-││╰╮││├┤│╭╮╮│╭╮│───││╰╮│││╭╮││╰╯╯│╭╮││╭╮╮│╭╮│─── 
-││─││││││││││╰╯│───││─││││╭╮││╭╮╮│╭╮││││││╰╯│─── 
-╰╯─╰─╯╰╯╰╯╰╯╰──╯───╰╯─╰─╯╰╯╰╯╰╯╰╯╰╯╰╯╰╯╰╯╰──╯─── 
+⁣╱╱┏╮╱╱╱╱╱╱╱╱╱╱
+╱╱┃┃╱╱┳╱┓┳╭┛┳┓
+▉━╯┗━╮┃╱┃┣┻╮┣╱
+▉┈┈┈┈┃┻┛┛┻╱┗┗┛
+▉╮┈┈┈┃▔▔▔▔▔▔▔▔
+╱╰━━━╯
 */
 
 import { watchFile, unwatchFile } from 'fs' 
@@ -30,15 +30,15 @@ global.confirmCode = ''
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 
 global.owner = [
-  ['573223702049', '۪〬.࠭⤿ 👑 ⋅ 𝖩𝗈𝗌se 𝗖𝗋𝖾𝖺𝖽𝗈𝗋', true],
+  ['573223702049', '۪〬.࠭⤿ 👑 ⋅ 𝐉𝐮𝐚𝐧 𝗖𝗋𝖾𝖺𝖽𝗈𝗋', true],
 ];
 
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 global.Sesion = 'Data/Sesiones','573223702049'
-global.mods = ['573223702049', '212770245767', '595972314588', '15614809253']
-global.suittag = ['595972314588', '51904792134', '212770245767','573223702049'] 
-global.prems = ['573223702049', '212770245767', '595972314588', '15614809253']
+global.mods = ['573223702049']
+global.suittag = ['573223702049'] 
+global.prems = ['573223702049']
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 
@@ -47,28 +47,28 @@ global.baileys = 'V 6.7.9'
 global.languaje = 'Español'
 global.vs = '2.2.0'
 global.vsJB = '5.0'
-global.nameqr = 'Escanor'
-global.namebot = 'Escanor-Bot'
+global.nameqr = '𝔍𝒊𝒓𝒆𝒏 𝑩𝒐𝒕'
+global.namebot = '𝔍𝒊𝒓𝒆𝒏 𝑩𝒐𝒕'
 global.sessions = 'BotSession'
 global.jadi = 'jadibts' 
 global.NakanoJadibts = true
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 
-global.packname = 'Escanor-Bot'
-global.botname = 'Escanor-Bot'
-global.wm = '© ᥴrᥱᥲძ᥆r JUan ᥊rᥣ.'
+global.packname = '𝔍𝒊𝒓𝒆𝒏 𝑩𝒐𝒕'
+global.botname = '𝔍𝒊𝒓𝒆𝒏 𝑩𝒐𝒕'
+global.wm = '© 𝑪𝒓𝒆𝒂𝒅𝒐𝒓 𝕵𝖚𝖆𝖓 ❄︎.'
 global.wm3 = '⫹⫺  ᴍᴜʟᴛɪ ᴅᴇᴠɪᴄᴇ'
 global.footer = global.wm
-global.author = 'Made By JUan Elber'
-global.dev = '© ⍴᥆ᥕᥱrᥱძ ᑲᥡ JUan ᥊rᥣ'
-global.textbot = 'Escanor-Bot JUan'
-global.etiqueta = '@xrljose'
+global.author = '𝐌𝐚𝐝𝐞 𝐁𝐲 𝕵𝖚𝖆𝖓 ❄︎'
+global.dev = '© ⍴᥆ᥕᥱrᥱძ ᑲᥡ 𝕵𝖚𝖆𝖓 ❄︎'
+global.textbot = '𝔍𝒊𝒓𝒆𝒏 𝑩𝒐𝒕'
+global.etiqueta = '𝕵𝖚𝖆𝖓 ❄︎'
 global.titulowm = 'Whatsapp Multi Device';
 global.titulowm2 = 'Escanor-Bot Ai'
-global.igfg = '@xrlJuan'
-global.gt = '© ᥴrᥱᥲ𝗍ᥱძ ᑲᥡ JUan ᥊rᥣ';
-global.me = 'JUan 𝗍ᥙ ⍴ᥲ⍴ᥲі 🫵😒';
+global.igfg = '@𝕵𝖚𝖆𝖓 ❄︎'
+global.gt = '© ᥴrᥱᥲ𝗍ᥱძ ᑲᥡ 𝕵𝖚𝖆𝖓 ❄︎';
+global.me = '𝕵𝖚𝖆𝖓 𝐭𝐮 𝐩𝐚𝐩𝐚𝐢 🫵😒';
 global.listo = '*🍭 Aqui tiene*'
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
@@ -108,29 +108,15 @@ global.avatar = 'https://iili.io/FGLd7up.jpg'
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 
-global.gp1 = 'https://chat.whatsapp.com/EteP5pnrAZC14y9wReGF1V';
-global.comunidad1 = 'https://chat.whatsapp.com/DeJvBuS7QgB3Ybp1BZulWL';
-global.channel = 'https://whatsapp.com/channel/0029Vb4cQJu2f3EB7BS7o11M';
-global.channel2 = 'https://whatsapp.com/channel/0029ValMlRS6buMFL9d0iQ0S';
-global.md = 'https://github.com/JoseXrl15k/Nino-Nakano';
-global.correo = 'xrljose105@gmail.com';
-global.cn ='https://whatsapp.com/channel/0029Vb4cQJu2f3EB7BS7o11M';
-global.instagram = 'https://www.instagram.com/xrljose';
-global.whatsApp = 'https://wa.me/51904792134';
-global.correo = 'xrljose105@gmail.com';
-
+global.channel = "https://whatsapp.com/channel/0029VbARAwbEgGfOsCN1T10V"
+global.github = "https://github.com/juan20092"
+global.gmail = "juanboli2009@gmail.com"
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
 
 global.pdoc = ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/msword", "application/pdf", "text/rtf"]
 
 global.ch = {
-ch1: '120363377833048768@newsletter', //Nino Nakano Bot
-ch2: '120363323775906071@newsletter', //Free Codes Titans
-ch3: '120363220939514640@newsletter', //Genesis Bot
-ch4: '120363368073378190@newsletter', //Crow Bot
-ch5: '120363374486687514@newsletter', //Lynx Bot
-ch6: '120363183614708156@newsletter', //Sylphiette's Bot
-ch7: '120363350099548761@newsletter' // Starlight Channel
+ch1: '120363419404216418@newsletter', //Meliodas Bot
 }
 
 //✎﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏﹏
@@ -227,7 +213,7 @@ export default {
   namebot: global.namebot,
   sessions: global.sessions,
   jadi: global.jadi,
-  NakanoJadibts: global.NakanoJadibts,
+  NakanoJadibts: global.MeliJadibts,
   packname: global.packname,
   botname: global.botname,
   wm: global.wm,
