@@ -213,7 +213,7 @@ export default {
   namebot: global.namebot,
   sessions: global.sessions,
   jadi: global.jadi,
-  NakanoJadibts: global.MeliJadibts,
+  MeliJadibts: global.MeliJadibts,
   packname: global.packname,
   botname: global.botname,
   wm: global.wm,
