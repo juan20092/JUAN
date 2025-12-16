@@ -191,7 +191,7 @@ async function start(file) {
   const worker = setupClusterWorker(args)
   
   // Setup worker event handlers
-  setupWorkerMessageHandlers(worker, arguments)
+  setupWorkerMessageHandlers(worker, [file])
   setupWorkerExitHandlers(worker, args, file)
   
   // Display system information
