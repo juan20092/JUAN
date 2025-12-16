@@ -114,30 +114,31 @@ const logger = pino({
 }).child({ class: 'client' })
 logger.level = 'fatal'
 
-const connectionOptions = {
-  version: version,
-  logger,
-  printQRInTerminal: false,
-  auth: {
-    creds: state.creds,
-    keys: makeCacheableSignalKeyStore(state.keys, logger)
-  },
-  browser: Browsers.ubuntu('Chrome'),
-  markOnlineOnConnect: false,
-  generateHighQualityLinkPreview: false,
-  syncFullHistory: false,
-  retryRequestDelayMs: 10,
-  transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 10 },
-  maxMsgRetryCount: 15,
-  appStateMacVerification: {
-    patch: false,
-    snapshot: false
-  },
-  getMessage: async (key) => {
-    const jid = jidNormalizedUser(key.remoteJid)
-    return ''
+function createConnectionOptions(authState, logger) {
+  return {
+    version,
+    logger,
+    printQRInTerminal: false,
+    auth: {
+      creds: authState.creds,
+      keys: makeCacheableSignalKeyStore(authState.keys, logger)
+    },
+    browser: Browsers.ubuntu('Chrome'),
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+    syncFullHistory: false,
+    retryRequestDelayMs: 10,
+    transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 10 },
+    maxMsgRetryCount: 15,
+    appStateMacVerification: {
+      patch: false,
+      snapshot: false
+    },
+    getMessage: async () => ''
   }
 }
+
+const connectionOptions = createConnectionOptions(state, logger)
 
 global.conn = makeWASocket(connectionOptions)
 let conn = global.conn
@@ -153,82 +154,68 @@ try {
   process.exit(1)
 }
 
+function setupSubBotEventHandlers(subBotConn, botPath, saveSubBotCreds) {
+  subBotConn.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update
+    if (connection === 'open') {
+      console.log(chalk.green(`Sub-bot conectado: ${path.basename(botPath)}`))
+      const exists = global.conns.some((c) => c.user?.jid === subBotConn.user?.jid)
+      if (!exists) {
+        global.conns.push(subBotConn)
+        console.log(chalk.green(`Sub-bot agregado: ${subBotConn.user?.jid}`))
+      }
+    } else if (connection === 'close') {
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      console.error(chalk.red(`Sub-bot desconectado: ${path.basename(botPath)} (${reason})`))
+      
+      if (reason === DisconnectReason.loggedOut || reason === 401) {
+        console.log(chalk.red(`Eliminando sesión: ${path.basename(botPath)}`))
+        global.conns = global.conns.filter((conn) => conn.user?.jid !== subBotConn.user?.jid)
+        try {
+          rmSync(botPath, { recursive: true, force: true })
+          console.log(chalk.red(`Sesión eliminada: ${botPath}`))
+        } catch (e) {
+          console.error(chalk.red(`Error al eliminar sesión ${botPath}:`), e.message)
+        }
+      }
+    }
+  })
+  
+  subBotConn.ev.on('creds.update', saveSubBotCreds)
+}
+
+function setupSubBotHandler(subBotConn, handler) {
+  const boundHandler = handler.bind(subBotConn)
+  subBotConn.handler = async (upsert) => {
+    try {
+      const jid = upsert?.messages?.[0]?.key?.remoteJid
+      if (jid) await subBotConn.sendPresenceUpdate('composing', jid).catch(() => {})
+    } catch {}
+    return boundHandler(upsert)
+  }
+  subBotConn.ev.on('messages.upsert', subBotConn.handler)
+}
+
 async function reconnectSubBot(botPath) {
-  console.log(chalk.yellow(`[DEBUG] Intentando reconectar sub-bot en: ${path.basename(botPath)}`))
+  console.log(chalk.yellow(`Reconectando sub-bot: ${path.basename(botPath)}`))
   try {
     const { state: subBotState, saveCreds: saveSubBotCreds } = await useMultiFileAuthState(botPath)
 
     if (!subBotState.creds.registered) {
-      console.warn(chalk.yellow(`[DEBUG] Advertencia: El sub-bot en ${path.basename(botPath)} no está registrado. Salto la conexión.`))
+      console.warn(chalk.yellow(`Sub-bot no registrado: ${path.basename(botPath)}`))
       return
     }
 
-    const subBotConn = makeWASocket({
-      version: version,
-      logger,
-      printQRInTerminal: false,
-      auth: {
-        creds: subBotState.creds,
-        keys: makeCacheableSignalKeyStore(subBotState.keys, logger)
-      },
-      browser: Browsers.ubuntu('Chrome'),
-      markOnlineOnConnect: false,
-      generateHighQualityLinkPreview: false,
-      syncFullHistory: false,
-      retryRequestDelayMs: 10,
-      transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 10 },
-      maxMsgRetryCount: 15,
-      appStateMacVerification: {
-        patch: false,
-        snapshot: false
-      },
-      getMessage: async (key) => ''
-    })
+    const subBotConn = makeWASocket(createConnectionOptions(subBotState, logger))
 
-    subBotConn.ev.on('connection.update', (update) => {
-      const { connection, lastDisconnect } = update
-      if (connection === 'open') {
-        console.log(chalk.green(`[DEBUG] Sub-bot conectado correctamente: ${path.basename(botPath)}`))
-        const yaExiste = global.conns.some((c) => c.user?.jid === subBotConn.user?.jid)
-        if (!yaExiste) {
-          global.conns.push(subBotConn)
-          console.log(chalk.green(`🟢 [DEBUG] Sub-bot agregado a global.conns: ${subBotConn.user?.jid}`))
-        }
-      } else if (connection === 'close') {
-        const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
-        console.error(chalk.red(`[DEBUG] Sub-bot desconectado en ${path.basename(botPath)}. Razón: ${reason}`))
-        if (reason === DisconnectReason.loggedOut || reason === 401) {
-          console.log(chalk.red(`❌ [DEBUG] Desconexión permanente detectada. Eliminando sesión del sub-bot en ${path.basename(botPath)}.`))
-          global.conns = global.conns.filter((conn) => conn.user?.jid !== subBotConn.user?.jid)
-          try {
-            rmSync(botPath, { recursive: true, force: true })
-            console.log(chalk.red(`✅ [DEBUG] Carpeta de sesión eliminada correctamente: ${botPath}`))
-          } catch (e) {
-            console.error(chalk.red(`❌ [ERROR] No se pudo eliminar la carpeta de sesión ${botPath}: ${e}`))
-          }
-        }
-      }
-    })
-    subBotConn.ev.on('creds.update', saveSubBotCreds)
+    setupSubBotEventHandlers(subBotConn, botPath, saveSubBotCreds)
+    setupSubBotHandler(subBotConn, handler)
 
-    const boundHandler = handler.bind(subBotConn)
-    subBotConn.handler = async (upsert) => {
-      try {
-        const jid = upsert?.messages?.[0]?.key?.remoteJid
-        if (jid) await subBotConn.sendPresenceUpdate('composing', jid).catch(() => {})
-      } catch {}
-      return boundHandler(upsert)
-    }
-    subBotConn.ev.on('messages.upsert', subBotConn.handler)
-    console.log(chalk.blue(`[DEBUG] Manejador asignado correctamente al sub-bot: ${path.basename(botPath)}`))
-
-    if (!global.subBots) {
-      global.subBots = {}
-    }
+    if (!global.subBots) global.subBots = {}
     global.subBots[path.basename(botPath)] = subBotConn
-    console.log(chalk.yellow(`[DEBUG] Paso 5: Sub-bot ${path.basename(botPath)} procesado y almacenado.`))
+    console.log(chalk.blue(`Sub-bot procesado: ${path.basename(botPath)}`))
   } catch (e) {
-    console.error(chalk.red(`[DEBUG] Error fatal al intentar reconectar sub-bot en ${path.basename(botPath)}:`), e)
+    console.error(chalk.red(`Error al reconectar sub-bot ${path.basename(botPath)}:`), e.message)
   }
 }
 
@@ -237,33 +224,38 @@ async function startSubBots() {
 
   if (!existsSync(rutaJadiBot)) {
     mkdirSync(rutaJadiBot, { recursive: true })
-    console.log(chalk.bold.cyan(`La carpeta: ${rutaJadiBot} se creó correctamente.`))
-  } else {
-    console.log(chalk.bold.cyan(`La carpeta: ${rutaJadiBot} ya está creada.`))
+    console.log(chalk.cyan(`Carpeta creada: ${rutaJadiBot}`))
   }
 
   const readRutaJadiBot = readdirSync(rutaJadiBot)
-  if (readRutaJadiBot.length > 0) {
-    const credsFile = 'creds.json'
-    console.log(chalk.magenta(`[DEBUG] Iniciando proceso de reconexión de sub-bots. Total de directorios encontrados: ${readRutaJadiBot.length}`))
-    for (const subBotDir of readRutaJadiBot) {
-      const botPath = join(rutaJadiBot, subBotDir)
-      if (statSync(botPath).isDirectory()) {
-        const readBotPath = readdirSync(botPath)
-        if (readBotPath.includes(credsFile)) {
-          console.log(chalk.magenta(`[DEBUG] Se encontró 'creds.json' en ${subBotDir}. Intentando reconectar...`))
-          await reconnectSubBot(botPath)
-        } else {
-          console.log(chalk.yellow(`[DEBUG] No se encontró 'creds.json' en ${subBotDir}. Este sub-bot puede no estar registrado o la sesión es inválida.`))
-        }
-      } else {
-        console.log(chalk.gray(`[DEBUG] '${subBotDir}' en JadiBots no es un directorio, saltando.`))
-      }
-    }
-    console.log(chalk.magenta(`[DEBUG] Proceso de reconexión de sub-bots finalizado.`))
-  } else {
-    console.log(chalk.gray(`[DEBUG] No se encontraron carpetas de sub-bots en ${rutaJadiBot}.`))
+  if (readRutaJadiBot.length === 0) {
+    console.log(chalk.gray(`No se encontraron sub-bots en ${rutaJadiBot}`))
+    return
   }
+
+  const credsFile = 'creds.json'
+  console.log(chalk.magenta(`Iniciando reconexión de ${readRutaJadiBot.length} sub-bots`))
+  
+  for (const subBotDir of readRutaJadiBot) {
+    const botPath = join(rutaJadiBot, subBotDir)
+    try {
+      if (!statSync(botPath).isDirectory()) {
+        console.log(chalk.gray(`Ignorando archivo: ${subBotDir}`))
+        continue
+      }
+
+      const readBotPath = readdirSync(botPath)
+      if (readBotPath.includes(credsFile)) {
+        console.log(chalk.magenta(`Reconectando: ${subBotDir}`))
+        await reconnectSubBot(botPath)
+      } else {
+        console.log(chalk.yellow(`Sin creds.json: ${subBotDir}`))
+      }
+    } catch (e) {
+      console.error(chalk.red(`Error procesando ${subBotDir}:`), e.message)
+    }
+  }
+  console.log(chalk.magenta(`Reconexión de sub-bots completada`))
 }
 
 await startSubBots()
@@ -342,116 +334,205 @@ await handleLogin()
 conn.isInit = false
 conn.well = false
 
+const DB_WRITE_INTERVAL = 30 * 1000 // 30 seconds
+const AUTOCLEAR_AGE_MINUTES = 3
+
 if (!opts['test']) {
   if (global.db) {
     setInterval(async () => {
-      if (global.db.data) await global.db.write()
+      try {
+        if (global.db.data) await global.db.write()
+      } catch (e) {
+        console.error(chalk.red('Error escribiendo base de datos:'), e.message)
+      }
+      
       if (opts['autocleartmp']) {
         const tmp = [tmpdir(), 'tmp', 'serbot']
         tmp.forEach((filename) => {
-          spawn('find', [filename, '-amin', '3', '-type', 'f', '-delete'])
+          try {
+            spawn('find', [filename, '-amin', String(AUTOCLEAR_AGE_MINUTES), '-type', 'f', '-delete'])
+          } catch (e) {
+            // Ignore errors in cleanup
+          }
         })
       }
-    }, 30 * 1000)
+    }, DB_WRITE_INTERVAL)
   }
 }
+
+const CLEANUP_INTERVAL = 3 * 60 * 1000 // 3 minutes
+const FILE_MAX_AGE = 3 * 60 * 1000 // 3 minutes
 
 function clearTmp() {
   const tmp = [join(__dirname, './tmp')]
   const filename = []
-  tmp.forEach((dirname) => readdirSync(dirname).forEach((file) => filename.push(join(dirname, file))))
+  tmp.forEach((dirname) => {
+    try {
+      readdirSync(dirname).forEach((file) => filename.push(join(dirname, file)))
+    } catch (e) {
+      // Directory might not exist
+    }
+  })
   return filename.map((file) => {
-    const stats = statSync(file)
-    if (stats.isFile() && Date.now() - stats.mtimeMs >= 1000 * 60 * 3) return unlinkSync(file)
+    try {
+      const stats = statSync(file)
+      if (stats.isFile() && Date.now() - stats.mtimeMs >= FILE_MAX_AGE) {
+        unlinkSync(file)
+        return true
+      }
+    } catch (e) {
+      // File might have been deleted
+    }
     return false
   })
 }
 
 setInterval(() => {
   if (global.stopped === 'close' || !conn || !conn.user) return
-  clearTmp()
-}, 180000)
+  try {
+    clearTmp()
+  } catch (e) {
+    console.error(chalk.red('Error en limpieza de archivos temporales:'), e.message)
+  }
+}, CLEANUP_INTERVAL)
 
 if (typeof global.gc === 'function') {
+  const GC_INTERVAL = 5 * 60 * 1000 // 5 minutes
   setInterval(() => {
-    console.log(chalk.gray(`[DEBUG] Ejecutando recolección de basura...`))
-    global.gc()
-  }, 300000)
+    try {
+      global.gc()
+      console.log(chalk.gray(`Recolección de basura ejecutada`))
+    } catch (e) {
+      console.error(chalk.red('Error en recolección de basura:'), e.message)
+    }
+  }, GC_INTERVAL)
 } else {
-  console.log(chalk.yellow(`[WARN] La recolección de basura no está disponible. Para habilitarla, ejecuta Node.js con la bandera --expose-gc.`))
+  console.log(chalk.yellow(`Recolección de basura no disponible. Ejecuta Node.js con --expose-gc`))
 }
 
 async function connectionUpdate(update) {
   const { connection, lastDisconnect, isNewLogin } = update
   global.stopped = connection
+  
   if (isNewLogin) conn.isInit = true
-  const code =
-    lastDisconnect?.error?.output?.statusCode ||
-    lastDisconnect?.error?.output?.payload?.statusCode
+  
+  const code = lastDisconnect?.error?.output?.statusCode || 
+               lastDisconnect?.error?.output?.payload?.statusCode
+  
   if (code && code !== DisconnectReason.loggedOut && conn?.ws.socket == null) {
-    await global.reloadHandler(true).catch(console.error)
-    global.timestamp.connect = new Date()
+    try {
+      await global.reloadHandler(true)
+      global.timestamp.connect = new Date()
+    } catch (e) {
+      console.error(chalk.red('Error en reloadHandler:'), e.message)
+    }
   }
-  if (global.db.data == null) await loadDatabase()
+  
+  if (global.db.data == null) {
+    try {
+      await loadDatabase()
+    } catch (e) {
+      console.error(chalk.red('Error cargando base de datos:'), e.message)
+    }
+  }
+  
   if (connection === 'open') {
-    console.log(chalk.yellow('Conectado correctamente el bot principal.'))
+    console.log(chalk.yellow('Bot principal conectado'))
   }
+  
   const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+  
   if (reason === 405) {
-    if (existsSync('./sessions/creds.json')) unlinkSync('./sessions/creds.json')
-    console.log(
-      chalk.bold.redBright(
-        `Conexión reemplazada para el bot principal, por favor espera un momento. Reiniciando...\nSi aparecen errores, vuelve a iniciar con: npm start`
-      )
-    )
+    try {
+      if (existsSync('./sessions/creds.json')) unlinkSync('./sessions/creds.json')
+    } catch (e) {
+      console.error(chalk.red('Error eliminando creds.json:'), e.message)
+    }
+    console.log(chalk.redBright('Conexión reemplazada. Reiniciando...\nSi hay errores, reinicia con: npm start'))
     if (typeof process.send === 'function') process.send('reset')
   }
+  
   if (connection === 'close') {
     switch (reason) {
       case DisconnectReason.badSession:
-        conn.logger.error(`Sesión principal incorrecta, elimina la carpeta ${global.authFile} y escanea nuevamente.`)
+        conn.logger.error(`Sesión incorrecta, elimina ${global.authFile} y reconecta`)
         break
       case DisconnectReason.connectionClosed:
       case DisconnectReason.connectionLost:
       case DisconnectReason.timedOut:
-        conn.logger.warn(`Conexión principal perdida o cerrada, reconectando...`)
-        await global.reloadHandler(true).catch(console.error)
+        conn.logger.warn('Conexión perdida, reconectando...')
+        try {
+          await global.reloadHandler(true)
+        } catch (e) {
+          console.error(chalk.red('Error reconectando:'), e.message)
+        }
         break
       case DisconnectReason.connectionReplaced:
-        conn.logger.error(`Conexión principal reemplazada, se abrió otra sesión. Cierra esta sesión primero.`)
+        conn.logger.error('Conexión reemplazada, cierra la otra sesión primero')
         break
       case DisconnectReason.loggedOut:
-        conn.logger.error(`Sesión principal cerrada, elimina la carpeta ${global.authFile} y escanea nuevamente.`)
+        conn.logger.error(`Sesión cerrada, elimina ${global.authFile} y reconecta`)
         break
       case DisconnectReason.restartRequired:
-        conn.logger.info(`Reinicio necesario del bot principal, reinicia el servidor si hay problemas.`)
-        await global.reloadHandler(true).catch(console.error)
+        conn.logger.info('Reinicio requerido')
+        try {
+          await global.reloadHandler(true)
+        } catch (e) {
+          console.error(chalk.red('Error en reinicio:'), e.message)
+        }
         break
       default:
-        conn.logger.warn(`Desconexión desconocida del bot principal: ${reason || ''} - Estado: ${connection || ''}`)
-        await global.reloadHandler(true).catch(console.error)
+        conn.logger.warn(`Desconexión: ${reason || 'desconocida'} - Estado: ${connection || 'N/A'}`)
+        try {
+          await global.reloadHandler(true)
+        } catch (e) {
+          console.error(chalk.red('Error en reconexión:'), e.message)
+        }
         break
     }
   }
 }
 
-process.on('uncaughtException', console.error)
+process.on('uncaughtException', (error) => {
+  console.error(chalk.red('[UNCAUGHT EXCEPTION]'), error)
+  if (error.code === 'ENOSPC') {
+    console.error('Sin espacio en disco o límite de watchers alcanzado')
+    process.exit(1)
+  }
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(chalk.red('[UNHANDLED REJECTION]'), reason)
+})
 
 let isInit = true
 
 global.reloadHandler = async function (restartConn) {
   try {
-    const Handler = await import(`./handler.js?update=${Date.now()}`).catch(console.error)
-    if (Handler && Handler.handler) handler = Handler.handler
+    const Handler = await import(`./handler.js?update=${Date.now()}`)
+    if (Handler && Handler.handler) {
+      handler = Handler.handler
+    } else {
+      throw new Error('Handler no encontrado en el módulo')
+    }
   } catch (e) {
-    console.error(`[ERROR] Fallo al cargar handler.js: ${e}`)
+    console.error(chalk.red('[ERROR] No se pudo cargar handler.js:'), e.message)
+    return false
   }
 
   if (restartConn) {
     try {
       if (global.conn.ws) global.conn.ws.close()
-    } catch {}
-    global.conn.ev.removeAllListeners()
+    } catch (e) {
+      console.error(chalk.red('Error al cerrar conexión:'), e.message)
+    }
+    
+    try {
+      global.conn.ev.removeAllListeners()
+    } catch (e) {
+      console.error(chalk.red('Error al remover listeners:'), e.message)
+    }
+    
     global.conn = makeWASocket(connectionOptions)
     conn = global.conn
     isInit = true
@@ -502,30 +583,38 @@ async function filesInit() {
 await filesInit()
 
 global.reload = async (_ev, filename) => {
-  if (pluginFilter(filename)) {
-    const dir = global.__filename(join(pluginFolder, filename), true)
-    if (filename in global.plugins) {
-      if (existsSync(dir)) conn.logger.info(`Updated plugin - '${filename}'`)
-      else {
-        conn.logger.warn(`Deleted plugin - '${filename}'`)
-        return delete global.plugins[filename]
-      }
-    } else conn.logger.info(`New plugin - '${filename}'`)
+  if (!pluginFilter(filename)) return
+  
+  const dir = global.__filename(join(pluginFolder, filename), true)
+  
+  if (filename in global.plugins) {
+    if (existsSync(dir)) {
+      conn.logger.info(`Plugin actualizado: '${filename}'`)
+    } else {
+      conn.logger.warn(`Plugin eliminado: '${filename}'`)
+      return delete global.plugins[filename]
+    }
+  } else {
+    conn.logger.info(`Plugin nuevo: '${filename}'`)
+  }
 
-    const err = syntaxerror(readFileSync(dir), filename, {
-      sourceType: 'module',
-      allowAwaitOutsideFunction: true
-    })
-    if (err) conn.logger.error(`Syntax error while loading '${filename}':\n${format(err)}`)
-    else {
-      try {
-        const module = await import(`${global.__filename(dir)}?update=${Date.now()}`)
-        global.plugins[filename] = module.default || module
-      } catch (e) {
-        conn.logger.error(`Error requiring plugin '${filename}':\n${format(e)}`)
-      } finally {
-        global.plugins = Object.fromEntries(Object.entries(global.plugins).sort(([a], [b]) => a.localeCompare(b)))
-      }
+  const err = syntaxerror(readFileSync(dir), filename, {
+    sourceType: 'module',
+    allowAwaitOutsideFunction: true
+  })
+  
+  if (err) {
+    conn.logger.error(`Error de sintaxis en '${filename}':\n${format(err)}`)
+  } else {
+    try {
+      const module = await import(`${global.__filename(dir)}?update=${Date.now()}`)
+      global.plugins[filename] = module.default || module
+    } catch (e) {
+      conn.logger.error(`Error cargando plugin '${filename}':\n${format(e)}`)
+    } finally {
+      global.plugins = Object.fromEntries(
+        Object.entries(global.plugins).sort(([a], [b]) => a.localeCompare(b))
+      )
     }
   }
 }
